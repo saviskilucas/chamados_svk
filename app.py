@@ -50,60 +50,46 @@ df_chamados = carregar_chamados()
 # Estrutura de Navegação em Menus Separados
 aba_kanban, aba_calendario, aba_novo = st.tabs(["Kanban", "Calendario", "Novo Chamado"])
 
-# MENU 1: KANBAN
+from streamlit_drag_drop_kanban import kanban_board
+
+# MENU 1: KANBAN COM DRAG & DROP
 with aba_kanban:
     if df_chamados.empty:
         st.info("Nenhuma tarefa encontrada.")
     else:
-        col_fazer, col_andamento, col_concluido = st.columns(3)
+        # Prepara a estrutura de colunas exigida pelo componente
+        board_data = {
+            "A Fazer": [],
+            "Em Andamento": [],
+            "Concluído": []
+        }
 
-        # A Fazer
-        with col_fazer:
-            st.subheader("A Fazer")
-            df_fazer = df_chamados[df_chamados["status"] == "A Fazer"]
-            for _, item in df_fazer.iterrows():
-                with st.container(border=True):
-                    st.markdown(f"**[{item['contexto']}]** {item['titulo']}")
-                    st.caption(f"Prazo: {item['data_entrega']} | Prioridade: {item['prioridade']}")
-                    if item['descricao']:
-                        st.text(item['descricao'])
-                    
-                    if st.button("Iniciar ->", key=f"fazer_{item['id']}"):
-                        supabase.table("chamados").update({"status": "Em Andamento"}).eq("id", item['id']).execute()
-                        st.rerun()
+        # Popula os dados vindos do Supabase
+        for _, item in df_chamados.iterrows():
+            card = {
+                "id": str(item["id"]),
+                "title": f"[{item['contexto']}] {item['titulo']}",
+                "description": f"Prazo: {item['data_entrega']} | Prioridade: {item['prioridade']}"
+            }
+            if item["status"] in board_data:
+                board_data[item["status"]].append(card)
 
-        # Em Andamento
-        with col_andamento:
-            st.subheader("Em Andamento")
-            df_andamento = df_chamados[df_chamados["status"] == "Em Andamento"]
-            for _, item in df_andamento.iterrows():
-                with st.container(border=True):
-                    st.markdown(f"**[{item['contexto']}]** {item['titulo']}")
-                    st.caption(f"Prazo: {item['data_entrega']} | Prioridade: {item['prioridade']}")
-                    if item['descricao']:
-                        st.text(item['descricao'])
-                    
-                    c1, c2 = st.columns(2)
-                    with c1:
-                        if st.button("<- Voltar", key=f"voltar_{item['id']}"):
-                            supabase.table("chamados").update({"status": "A Fazer"}).eq("id", item['id']).execute()
-                            st.rerun()
-                    with c2:
-                        if st.button("Concluir", key=f"concluir_{item['id']}"):
-                            supabase.table("chamados").update({"status": "Concluído"}).eq("id", item['id']).execute()
-                            st.rerun()
+        # Renderiza o Quadro Arrastável
+        updated_board = kanban_board(
+            board_data, 
+            key="kanban_drag_drop"
+        )
 
-        # Concluído
-        with col_concluido:
-            st.subheader("Concluído")
-            df_concluido = df_chamados[df_chamados["status"] == "Concluído"]
-            for _, item in df_concluido.iterrows():
-                with st.container(border=True):
-                    st.markdown(f"~~[{item['contexto']}] {item['titulo']}~~")
-                    st.caption(f"Status: Finalizado")
-                    
-                    if st.button("Excluir", key=f"del_{item['id']}"):
-                        supabase.table("chamados").delete().eq("id", item['id']).execute()
+        # Identifica alterações feitas ao arrastar e atualiza no Supabase
+        if updated_board and updated_board != board_data:
+            for status, cards in updated_board.items():
+                for card in cards:
+                    card_id = int(card["id"])
+                    # Verifica o status anterior do item
+                    status_atual = df_chamados.loc[df_chamados["id"] == card_id, "status"].values
+                    if len(status_atual) > 0 and status_atual[0] != status:
+                        # Atualiza no banco de dados apenas o card movido
+                        supabase.table("chamados").update({"status": status}).eq("id", card_id).execute()
                         st.rerun()
 
 # MENU 2: CALENDÁRIO SEPARADO
