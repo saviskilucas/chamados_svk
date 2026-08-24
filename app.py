@@ -4,29 +4,22 @@ from datetime import datetime
 from supabase import create_client, Client
 from streamlit_calendar import calendar
 
-# Importação com fallback de segurança para o Drag & Drop
-try:
-    from streamlit_drag_drop_kanban import kanban_board
-    HAS_KANBAN = True
-except ImportError:
-    HAS_KANBAN = False
-
-# Configuração da página (layout responsivo)
+# Configuração da página
 st.set_page_config(
     page_title="Central de Tarefas",
     layout="wide",
     initial_sidebar_state="collapsed"
 )
 
-# CSS Minimalista
+# Estilo minimalista CSS
 st.markdown("""
     <style>
-    .stButton>button { width: 100%; border-radius: 4px; }
+    .stButton>button { width: 100%; border-radius: 4px; height: 2em; }
     div[data-testid="stExpander"] { border: 1px solid #e0e0e0; }
     </style>
 """, unsafe_allow_html=True)
 
-# Conexão segura com Supabase via Secrets
+# Conexão com Supabase
 @st.cache_resource
 def init_supabase() -> Client:
     url = st.secrets["SUPABASE_URL"]
@@ -35,14 +28,11 @@ def init_supabase() -> Client:
 
 supabase = init_supabase()
 
-# Lista de contextos/negócios
 CONTEXTOS = ["Todos", "Negócio 1", "Negócio 2", "Negócio 3", "Negócio 4", "Faculdade", "Pessoal"]
 
-# Cabeçalho
 st.title("Central de Tarefas")
 contexto_filtro = st.selectbox("Filtrar contexto:", CONTEXTOS)
 
-# Função para carregar dados do Supabase
 def carregar_chamados():
     try:
         query = supabase.table("chamados").select("*").order("data_entrega")
@@ -55,45 +45,16 @@ def carregar_chamados():
 
 df_chamados = carregar_chamados()
 
-# Menus Separados
 aba_kanban, aba_calendario, aba_novo = st.tabs(["Kanban", "Calendario", "Novo Chamado"])
 
-# --- MENU 1: KANBAN ---
+# --- MENU 1: KANBAN MINIMALISTA ---
 with aba_kanban:
     if df_chamados.empty:
         st.info("Nenhuma tarefa encontrada.")
-    elif HAS_KANBAN:
-        # Modo Arrastável (Drag & Drop)
-        board_data = {
-            "A Fazer": [],
-            "Em Andamento": [],
-            "Concluído": []
-        }
-
-        for _, item in df_chamados.iterrows():
-            card = {
-                "id": str(item["id"]),
-                "title": f"[{item['contexto']}] {item['titulo']}",
-                "description": f"Prazo: {item['data_entrega']} | Prioridade: {item['prioridade']}"
-            }
-            if item["status"] in board_data:
-                board_data[item["status"]].append(card)
-
-        updated_board = kanban_board(board_data, key="kanban_drag_drop")
-
-        # Detecta movimento no quadro e atualiza o Supabase
-        if updated_board and updated_board != board_data:
-            for status, cards in updated_board.items():
-                for card in cards:
-                    card_id = int(card["id"])
-                    status_atual = df_chamados.loc[df_chamados["id"] == card_id, "status"].values
-                    if len(status_atual) > 0 and status_atual[0] != status:
-                        supabase.table("chamados").update({"status": status}).eq("id", card_id).execute()
-                        st.rerun()
     else:
-        # Modo Alternativo (Botões) caso a biblioteca de drag&drop falhe no servidor
         col_fazer, col_andamento, col_concluido = st.columns(3)
 
+        # Coluna: A Fazer
         with col_fazer:
             st.subheader("A Fazer")
             df_fazer = df_chamados[df_chamados["status"] == "A Fazer"]
@@ -103,10 +64,12 @@ with aba_kanban:
                     st.caption(f"Prazo: {item['data_entrega']} | Prioridade: {item['prioridade']}")
                     if item['descricao']:
                         st.text(item['descricao'])
-                    if st.button("Iniciar ->", key=f"fazer_{item['id']}"):
+                    
+                    if st.button("Mover para Andamento", key=f"fazer_{item['id']}"):
                         supabase.table("chamados").update({"status": "Em Andamento"}).eq("id", item['id']).execute()
                         st.rerun()
 
+        # Coluna: Em Andamento
         with col_andamento:
             st.subheader("Em Andamento")
             df_andamento = df_chamados[df_chamados["status"] == "Em Andamento"]
@@ -116,16 +79,18 @@ with aba_kanban:
                     st.caption(f"Prazo: {item['data_entrega']} | Prioridade: {item['prioridade']}")
                     if item['descricao']:
                         st.text(item['descricao'])
+                    
                     c1, c2 = st.columns(2)
                     with c1:
                         if st.button("<- Voltar", key=f"voltar_{item['id']}"):
                             supabase.table("chamados").update({"status": "A Fazer"}).eq("id", item['id']).execute()
                             st.rerun()
                     with c2:
-                        if st.button("Concluir", key=f"concluir_{item['id']}"):
+                        if st.button("Concluir ->", key=f"concluir_{item['id']}"):
                             supabase.table("chamados").update({"status": "Concluído"}).eq("id", item['id']).execute()
                             st.rerun()
 
+        # Coluna: Concluído
         with col_concluido:
             st.subheader("Concluído")
             df_concluido = df_chamados[df_chamados["status"] == "Concluído"]
@@ -133,6 +98,7 @@ with aba_kanban:
                 with st.container(border=True):
                     st.markdown(f"~~[{item['contexto']}] {item['titulo']}~~")
                     st.caption("Status: Finalizado")
+                    
                     if st.button("Excluir", key=f"del_{item['id']}"):
                         supabase.table("chamados").delete().eq("id", item['id']).execute()
                         st.rerun()
