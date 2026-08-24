@@ -100,3 +100,36 @@ with aba_novo:
                 supabase.table("chamados").insert(novo_dado).execute()
                 st.success(f"Chamado '{titulo}' salvo com sucesso!")
                 st.rerun()
+
+from streamlit_calendar import calendar
+
+# Criando 3 abas agora: Calendário, Chamados e Novo
+aba_agenda, aba_chamados, aba_novo = st.tabs(["📅 Agenda", "📋 Chamados", "➕ Novo Chamado"])
+
+with aba_agenda:
+    st.subheader("Visão Mensal / Semanal")
+    
+    if not df_chamados.empty:
+        # Formata os dados do Supabase para o padrão do calendário
+        eventos = []
+        for _, item in df_chamados.iterrows():
+            eventos.append({
+                "title": f"[{item['contexto']}] {item['titulo']}",
+                "start": item['data_entrega'],
+                "end": item['data_entrega'],
+                "color": "#ff4b4b" if item['prioridade'] == "Urgente" else "#3788d8"
+            })
+        
+        # Opções de configuração do Google Agenda
+        options = {
+            "initialView": "dayGridMonth",
+            "headerToolbar": {
+                "left": "prev,next today",
+                "center": "title",
+                "right": "dayGridMonth,timeGridWeek"
+            },
+        }
+        
+        calendar(events=eventos, options=options, key="agenda_central")
+    else:
+        st.info("Nenhum compromisso para exibir no calendário.")
