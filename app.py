@@ -47,29 +47,59 @@ aba_chamados, aba_novo = st.tabs(["📋 Chamados", "➕ Novo Chamado"])
 # TAB 1: VISUALIZAÇÃO DOS CHAMADOS
 with aba_chamados:
     if df_chamados.empty:
-        st.info("Nenhum chamado cadastrado para este contexto.")
+        st.info("Nenhum chamado encontrado para este contexto.")
     else:
-        status_opcoes = ["A Fazer", "Em Andamento", "Concluído"]
-        status_selecionado = st.multiselect("Filtrar por Status", status_opcoes, default=["A Fazer", "Em Andamento"])
-        
-        df_filtrado = df_chamados[df_chamados["status"].isin(status_selecionado)]
-        
-        for _, item in df_filtrado.iterrows():
-            com_cor = "🔴" if item['status'] == "A Fazer" else ("🟡" if item['status'] == "Em Andamento" else "🟢")
+        # Criando as 3 colunas do Kanban
+        col_fazer, col_andamento, col_concluido = st.columns(3)
+
+        # --- COLUNA 1: A FAZER ---
+        with col_fazer:
+            st.markdown("### 🔴 A Fazer")
+            df_fazer = df_chamados[df_chamados["status"] == "A Fazer"]
             
-            with st.expander(f"{com_cor} [{item['contexto']}] {item['titulo']} — Prazo: {item['data_entrega']}"):
-                st.write(f"**Prioridade:** {item['prioridade']}")
-                st.write(f"**Status:** {item['status']}")
-                if item['descricao']:
-                    st.write(f"**Anotações:** {item['descricao']}")
-                
-                col1, col2 = st.columns(2)
-                with col1:
-                    if item['status'] != "Concluído":
-                        if st.button("✅ Marcar como Concluído", key=f"concluir_{item['id']}"):
+            for _, item in df_fazer.iterrows():
+                with st.container(border=True):
+                    st.markdown(f"**[{item['contexto']}]** {item['titulo']}")
+                    st.caption(f"📅 Prazo: {item['data_entrega']} | 🔥 {item['prioridade']}")
+                    if item['descricao']:
+                        st.write(item['descricao'])
+                    
+                    if st.button("Mover ➡️", key=f"fazer_{item['id']}"):
+                        supabase.table("chamados").update({"status": "Em Andamento"}).eq("id", item['id']).execute()
+                        st.rerun()
+
+        # --- COLUNA 2: EM ANDAMENTO ---
+        with col_andamento:
+            st.markdown("### 🟡 Em Andamento")
+            df_andamento = df_chamados[df_chamados["status"] == "Em Andamento"]
+            
+            for _, item in df_andamento.iterrows():
+                with st.container(border=True):
+                    st.markdown(f"**[{item['contexto']}]** {item['titulo']}")
+                    st.caption(f"📅 Prazo: {item['data_entrega']} | 🔥 {item['prioridade']}")
+                    if item['descricao']:
+                        st.write(item['descricao'])
+                    
+                    c1, c2 = st.columns(2)
+                    with c1:
+                        if st.button("⬅️", key=f"voltar_{item['id']}"):
+                            supabase.table("chamados").update({"status": "A Fazer"}).eq("id", item['id']).execute()
+                            st.rerun()
+                    with c2:
+                        if st.button("✅", key=f"concluir_{item['id']}"):
                             supabase.table("chamados").update({"status": "Concluído"}).eq("id", item['id']).execute()
                             st.rerun()
-                with col2:
+
+        # --- COLUNA 3: CONCLUÍDO ---
+        with col_concluido:
+            st.markdown("### 🟢 Concluído")
+            df_concluido = df_chamados[df_chamados["status"] == "Concluído"]
+            
+            for _, item in df_concluido.iterrows():
+                with st.container(border=True):
+                    st.markdown(f"~~**[{item['contexto']}]** {item['titulo']}~~")
+                    st.caption(f"📅 Concluído")
+                    
                     if st.button("🗑️ Excluir", key=f"del_{item['id']}"):
                         supabase.table("chamados").delete().eq("id", item['id']).execute()
                         st.rerun()
