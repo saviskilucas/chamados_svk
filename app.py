@@ -4,14 +4,21 @@ from datetime import datetime
 from supabase import create_client, Client
 from streamlit_calendar import calendar
 
-# Configuração da página
+# Importação com fallback de segurança para o Drag & Drop
+try:
+    from streamlit_drag_drop_kanban import kanban_board
+    HAS_KANBAN = True
+except ImportError:
+    HAS_KANBAN = False
+
+# Configuração da página (layout responsivo)
 st.set_page_config(
     page_title="Central de Tarefas",
     layout="wide",
     initial_sidebar_state="collapsed"
 )
 
-# Estilo minimalista CSS
+# CSS Minimalista
 st.markdown("""
     <style>
     .stButton>button { width: 100%; border-radius: 4px; }
@@ -19,7 +26,7 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-# Conexão com Supabase
+# Conexão segura com Supabase via Secrets
 @st.cache_resource
 def init_supabase() -> Client:
     url = st.secrets["SUPABASE_URL"]
@@ -28,13 +35,14 @@ def init_supabase() -> Client:
 
 supabase = init_supabase()
 
+# Lista de contextos/negócios
 CONTEXTOS = ["Todos", "Negócio 1", "Negócio 2", "Negócio 3", "Negócio 4", "Faculdade", "Pessoal"]
 
-# Cabeçalho limpo
+# Cabeçalho
 st.title("Central de Tarefas")
 contexto_filtro = st.selectbox("Filtrar contexto:", CONTEXTOS)
 
-# Buscar dados
+# Função para carregar dados do Supabase
 def carregar_chamados():
     try:
         query = supabase.table("chamados").select("*").order("data_entrega")
@@ -47,24 +55,21 @@ def carregar_chamados():
 
 df_chamados = carregar_chamados()
 
-# Estrutura de Navegação em Menus Separados
+# Menus Separados
 aba_kanban, aba_calendario, aba_novo = st.tabs(["Kanban", "Calendario", "Novo Chamado"])
 
-from streamlit_drag_drop_kanban import kanban_board
-
-# MENU 1: KANBAN COM DRAG & DROP
+# --- MENU 1: KANBAN ---
 with aba_kanban:
     if df_chamados.empty:
         st.info("Nenhuma tarefa encontrada.")
-    else:
-        # Prepara a estrutura de colunas exigida pelo componente
+    elif HAS_KANBAN:
+        # Modo Arrastável (Drag & Drop)
         board_data = {
             "A Fazer": [],
             "Em Andamento": [],
             "Concluído": []
         }
 
-        # Popula os dados vindos do Supabase
         for _, item in df_chamados.iterrows():
             card = {
                 "id": str(item["id"]),
@@ -74,25 +79,65 @@ with aba_kanban:
             if item["status"] in board_data:
                 board_data[item["status"]].append(card)
 
-        # Renderiza o Quadro Arrastável
-        updated_board = kanban_board(
-            board_data, 
-            key="kanban_drag_drop"
-        )
+        updated_board = kanban_board(board_data, key="kanban_drag_drop")
 
-        # Identifica alterações feitas ao arrastar e atualiza no Supabase
+        # Detecta movimento no quadro e atualiza o Supabase
         if updated_board and updated_board != board_data:
             for status, cards in updated_board.items():
                 for card in cards:
                     card_id = int(card["id"])
-                    # Verifica o status anterior do item
                     status_atual = df_chamados.loc[df_chamados["id"] == card_id, "status"].values
                     if len(status_atual) > 0 and status_atual[0] != status:
-                        # Atualiza no banco de dados apenas o card movido
                         supabase.table("chamados").update({"status": status}).eq("id", card_id).execute()
                         st.rerun()
+    else:
+        # Modo Alternativo (Botões) caso a biblioteca de drag&drop falhe no servidor
+        col_fazer, col_andamento, col_concluido = st.columns(3)
 
-# MENU 2: CALENDÁRIO SEPARADO
+        with col_fazer:
+            st.subheader("A Fazer")
+            df_fazer = df_chamados[df_chamados["status"] == "A Fazer"]
+            for _, item in df_fazer.iterrows():
+                with st.container(border=True):
+                    st.markdown(f"**[{item['contexto']}]** {item['titulo']}")
+                    st.caption(f"Prazo: {item['data_entrega']} | Prioridade: {item['prioridade']}")
+                    if item['descricao']:
+                        st.text(item['descricao'])
+                    if st.button("Iniciar ->", key=f"fazer_{item['id']}"):
+                        supabase.table("chamados").update({"status": "Em Andamento"}).eq("id", item['id']).execute()
+                        st.rerun()
+
+        with col_andamento:
+            st.subheader("Em Andamento")
+            df_andamento = df_chamados[df_chamados["status"] == "Em Andamento"]
+            for _, item in df_andamento.iterrows():
+                with st.container(border=True):
+                    st.markdown(f"**[{item['contexto']}]** {item['titulo']}")
+                    st.caption(f"Prazo: {item['data_entrega']} | Prioridade: {item['prioridade']}")
+                    if item['descricao']:
+                        st.text(item['descricao'])
+                    c1, c2 = st.columns(2)
+                    with c1:
+                        if st.button("<- Voltar", key=f"voltar_{item['id']}"):
+                            supabase.table("chamados").update({"status": "A Fazer"}).eq("id", item['id']).execute()
+                            st.rerun()
+                    with c2:
+                        if st.button("Concluir", key=f"concluir_{item['id']}"):
+                            supabase.table("chamados").update({"status": "Concluído"}).eq("id", item['id']).execute()
+                            st.rerun()
+
+        with col_concluido:
+            st.subheader("Concluído")
+            df_concluido = df_chamados[df_chamados["status"] == "Concluído"]
+            for _, item in df_concluido.iterrows():
+                with st.container(border=True):
+                    st.markdown(f"~~[{item['contexto']}] {item['titulo']}~~")
+                    st.caption("Status: Finalizado")
+                    if st.button("Excluir", key=f"del_{item['id']}"):
+                        supabase.table("chamados").delete().eq("id", item['id']).execute()
+                        st.rerun()
+
+# --- MENU 2: CALENDÁRIO SEPARADO ---
 with aba_calendario:
     if not df_chamados.empty:
         eventos = []
@@ -101,7 +146,7 @@ with aba_calendario:
                 "title": f"[{item['contexto']}] {item['titulo']}",
                 "start": item['data_entrega'],
                 "end": item['data_entrega'],
-                "color": "#4a4a4a" if item['status'] == "Concluído" else "#1f77b4"
+                "color": "#888888" if item['status'] == "Concluído" else "#1f77b4"
             })
         
         options = {
@@ -116,7 +161,7 @@ with aba_calendario:
     else:
         st.info("Sem eventos para o calendário.")
 
-# MENU 3: NOVO CHAMADO
+# --- MENU 3: CRIAR TAREFA ---
 with aba_novo:
     with st.form("form_novo_chamado", clear_on_submit=True):
         titulo = st.text_input("Título *")
